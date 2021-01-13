@@ -1,0 +1,20 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build develop image",
+            "type": "shell",
+            "command": "docker build -t janus-dev .",
+            "problemMatcher": []
+        },
+        {
+            // running without debugging
+            "label": "run env",
+            "type": "shell",
+            "command": "docker run  --rm  -it -p 20000:80  -p 8088:8088 -p 7088:7088 -p 8188:8188  -p 10000-10050:10000-10050/udp  -v ${workspaceFolder}:/root/janus-gateway janus-dev ",
+            "problemMatcher": []
+        },
+    ]
+}
