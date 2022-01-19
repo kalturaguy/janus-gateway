@@ -41,10 +41,11 @@
  * @param[in] full_trickle Whether full-trickle must be used (instead of half-trickle)
  * @param[in] ignore_mdns Whether mDNS candidates should be ignored, instead of resolved
  * @param[in] ipv6 Whether IPv6 candidates must be negotiated or not
+ * @param[in] ipv6_linklocal Whether IPv6 link-local candidates should be gathered
  * @param[in] rtp_min_port Minimum port to use for RTP/RTCP, if a range is to be used
  * @param[in] rtp_max_port Maximum port to use for RTP/RTCP, if a range is to be used */
 void janus_ice_init(gboolean ice_lite, gboolean ice_tcp, gboolean full_trickle, gboolean ignore_mdns,
-	gboolean ipv6, uint16_t rtp_min_port, uint16_t rtp_max_port);
+	gboolean ipv6, gboolean ipv6_linklocal, uint16_t rtp_min_port, uint16_t rtp_max_port);
 /*! \brief ICE stuff de-initialization */
 void janus_ice_deinit(void);
 /*! \brief Method to check whether a STUN server is reachable
@@ -92,6 +93,11 @@ uint16_t janus_ice_get_turn_port(void);
 /*! \brief Method to get the specified TURN REST API backend, if any
  * @returns The currently specified  TURN REST API backend, if available, or NULL if not */
 char *janus_ice_get_turn_rest_api(void);
+/*! \brief Method to enable applications to force Janus to use TURN */
+void janus_ice_allow_force_relay(void);
+/*! \brief Method to check whether applications are allowed to force Janus to use TURN
+ * @returns TRUE if they're allowed, FALSE otherwise */
+gboolean janus_ice_is_force_relay_allowed(void);
 /*! \brief Helper method to force Janus to overwrite all host candidates with the public IP
  * @param[in] keep_private_host Whether we should keep the original private host as a separate candidate, or replace it */
 void janus_ice_enable_nat_1_1(gboolean keep_private_host);
@@ -133,6 +139,26 @@ gboolean janus_ice_is_mdns_enabled(void);
 /*! \brief Method to check whether IPv6 candidates are enabled/supported or not
  * @returns true if IPv6 candidates are enabled/supported, false otherwise */
 gboolean janus_ice_is_ipv6_enabled(void);
+/*! \brief Method to check whether IPv6 link-local candidates will be gathered or not
+ * \note This obviously only makes sense if IPv6 support is enabled in general
+ * @returns true if IPv6 link-local candidates will be gathered, false otherwise */
+gboolean janus_ice_is_ipv6_linklocal_enabled(void);
+#ifdef HAVE_ICE_NOMINATION
+/*! \brief Method to configure the ICE nomination mode (regular or aggressive)
+ * @param[in] nomination The ICE nomination mode (regular or aggressive) */
+void janus_ice_set_nomination_mode(const char *nomination);
+/*! \brief Method to return a string description of the configured ICE nomination mode
+ * @returns "regular" or "aggressive" */
+const char *janus_ice_get_nomination_mode(void);
+#endif
+/*! \brief Method to enable/disable connectivity checks as keepalives for PeerConnections.
+ * \note The main rationale behind this setting is provided in the libnice documentation:
+ * https://libnice.freedesktop.org/libnice/NiceAgent.html#NiceAgent--keepalive-conncheck
+ * @param[in] enabled Whether the functionality should be enabled or disabled */
+void janus_ice_set_keepalive_conncheck_enabled(gboolean enabled);
+/*! \brief Method to check whether connectivity checks will be used as keepalives
+ * @returns true if enabled, false (default) otherwise */
+gboolean janus_ice_is_keepalive_conncheck_enabled(void);
 /*! \brief Method to modify the min NACK value (i.e., the minimum time window of packets per handle to store for retransmissions)
  * @param[in] mnq The new min NACK value */
 void janus_set_min_nack_queue(uint16_t mnq);
@@ -144,7 +170,7 @@ uint16_t janus_get_min_nack_queue(void);
  * keyframe, as any missing packet won't be needed since the keyframe will allow the
  * media recipient to still restore a complete image anyway. Since this optimization
  * seems to cause some issues in some edge cases, it's disabled by default.
- * @param[in] optimize Whether the opzimization should be enabled or disabled */
+ * @param[in] optimize Whether the optimization should be enabled or disabled */
 void janus_set_nack_optimizations_enabled(gboolean optimize);
 /*! \brief Method to check whether NACK optimizations on outgoing keyframes are enabled or not
  * @returns optimize if optimizations are enabled, false otherwise */
@@ -179,6 +205,14 @@ void janus_ice_set_event_stats_period(int period);
 /*! \brief Method to get the current event handler statistics period (see above)
  * @returns The current event handler stats period */
 int janus_ice_get_event_stats_period(void);
+
+/*! \brief Method to define wether the media stats shall be dispatched in one event (true) or in dedicated single events (false - default)
+ * @param[in] combine_media_stats_to_one_event true to combine media statistics in on event or false to send dedicated events */
+void janus_ice_event_set_combine_media_stats(gboolean combine_media_stats_to_one_event);
+/*! \brief Method to retrieve wether media statistic events shall be dispatched combined or in single events
+ * @returns true to combine events */
+gboolean janus_ice_event_get_combine_media_stats(void);
+
 /*! \brief Method to check whether libnice debugging has been enabled (http://nice.freedesktop.org/libnice/libnice-Debug-messages.html)
  * @returns True if libnice debugging is enabled, FALSE otherwise */
 gboolean janus_ice_is_ice_debugging_enabled(void);
@@ -408,8 +442,8 @@ struct janus_ice_peerconnection {
 	gint audiolevel_ext_id;
 	/*! \brief Video orientation extension ID */
 	gint videoorientation_ext_id;
-	/*! \brief Frame marking extension ID */
-	gint framemarking_ext_id;
+	/*! \brief Absolute Send Time ext ID */
+	gint abs_send_time_ext_id;
 	/*! \brief Whether we do transport wide cc */
 	gboolean do_transport_wide_cc;
 	/*! \brief Transport wide cc rtp ext ID */
@@ -426,6 +460,8 @@ struct janus_ice_peerconnection {
 	guint transport_wide_cc_feedback_count;
 	/*! \brief GLib list of transport wide cc stats in reverse received order */
 	GSList *transport_wide_received_seq_nums;
+	/*! \brief Latest REMB feedback we received */
+	uint32_t remb_bitrate;
 	/*! \brief DTLS role of the server for this stream */
 	janus_dtls_role dtls_role;
 	/*! \brief Data exchanged for DTLS handshakes and messages */
@@ -600,8 +636,10 @@ janus_ice_handle *janus_ice_handle_create(void *core_session, const char *opaque
  * @param[in] core_session The core/peer session this ICE handle belongs to
  * @param[in] handle The Janus ICE handle
  * @param[in] plugin The plugin the ICE handle needs to be attached to
+ * @param[in] loop_index In case static event loops are used, an indication on which loop to use for this handle
+ * (-1 will let the core pick one; in case API selection is disabled in the settings, this value is ignored)
  * @returns 0 in case of success, a negative integer otherwise */
-gint janus_ice_handle_attach_plugin(void *core_session, janus_ice_handle *handle, janus_plugin *plugin);
+gint janus_ice_handle_attach_plugin(void *core_session, janus_ice_handle *handle, janus_plugin *plugin, int loop_index);
 /*! \brief Method to destroy a Janus ICE handle
  * @param[in] core_session The core/peer session this ICE handle belongs to
  * @param[in] handle The Janus ICE handle to destroy
@@ -659,6 +697,9 @@ void janus_ice_relay_sctp(janus_ice_handle *handle, char *buffer, int length);
 /*! \brief Plugin SCTP/DataChannel callback, called by the SCTP stack when data can be written
  * @param[in] handle The Janus ICE handle associated with the peer */
 void janus_ice_notify_data_ready(janus_ice_handle *handle);
+/*! \brief Core SDP callback, called by the SDP stack when a stream has been paused by a negotiation
+ * @param[in] handle The Janus ICE handle associated with the peer */
+void janus_ice_notify_media_stopped(janus_ice_handle *handle);
 ///@}
 
 
@@ -702,11 +743,15 @@ void janus_ice_resend_trickles(janus_ice_handle *handle);
 /*! \brief Method to configure the static event loops mechanism at startup
  * @note Check the \c event_loops property in the \c janus.jcfg configuration
  * for an explanation of this feature, and the possible impact on Janus and users
- * @param[in] loops The number of static event loops to start (0 to disable the feature) */
-void janus_ice_set_static_event_loops(int loops);
+ * @param[in] loops The number of static event loops to start (0 to disable the feature)
+ * @param[in] allow_api Whether allocation on a specific loop driven via API should be allowed or not (false by default) */
+void janus_ice_set_static_event_loops(int loops, gboolean allow_api);
 /*! \brief Method to return the number of static event loops, if enabled
  * @returns The number of static event loops, if configured, or 0 if the feature is disabled */
 int janus_ice_get_static_event_loops(void);
+/*! \brief Method to check whether loop indication via API is allowed
+ * @returns true if allowed, false otherwise */
+gboolean janus_ice_is_loop_indication_allowed(void);
 /*! \brief Method to stop all the static event loops, if enabled
  * @note This will wait for the related threads to exit, and so may delay the shutdown process */
 void janus_ice_stop_static_event_loops(void);

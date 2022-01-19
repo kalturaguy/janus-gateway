@@ -117,6 +117,7 @@ void janus_turnrest_response_destroy(janus_turnrest_response *response) {
 	g_free(response->username);
 	g_free(response->password);
 	g_list_free_full(response->servers, janus_turnrest_instance_destroy);
+	g_free(response);
 }
 
 janus_turnrest_response *janus_turnrest_request(const char *user) {
@@ -135,9 +136,9 @@ janus_turnrest_response *janus_turnrest_request(const char *user) {
 		 * See https://github.com/meetecho/janus-gateway/issues/1416 */
 		char buffer[256];
 		g_snprintf(buffer, 256, "&api=%s", api_key);
-		g_strlcat(query_string, buffer, 512);
+		janus_strlcat(query_string, buffer, 512);
 		g_snprintf(buffer, 256, "&key=%s", api_key);
-		g_strlcat(query_string, buffer, 512);
+		janus_strlcat(query_string, buffer, 512);
 	}
 	if(user != NULL) {
 		/* Note: 'username' is supposedly optional, but a commonly used
@@ -146,7 +147,7 @@ janus_turnrest_response *janus_turnrest_request(const char *user) {
 		 * See https://github.com/meetecho/janus-gateway/issues/2199 */
 		char buffer[256];
 		g_snprintf(buffer, 256, "&username=%s", user);
-		g_strlcat(query_string, buffer, 512);
+		janus_strlcat(query_string, buffer, 512);
 	}
 	char request_uri[1024];
 	g_snprintf(request_uri, 1024, "%s?%s", api_server, query_string);
@@ -267,6 +268,8 @@ janus_turnrest_response *janus_turnrest_request(const char *user) {
 			if(res != NULL)
 				freeaddrinfo(res);
 			g_strfreev(uri_parts);
+			g_strfreev(parts);
+			janus_turnrest_instance_destroy(instance);
 			continue;
 		}
 		freeaddrinfo(res);

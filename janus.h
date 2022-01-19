@@ -37,8 +37,6 @@
 #include "plugins/plugin.h"
 
 
-#define JANUS_BUFSIZE	8192
-
 /*! \brief Helper to address requests and their sources (e.g., a specific HTTP connection, websocket, RabbitMQ or others) */
 typedef struct janus_request janus_request;
 
@@ -53,7 +51,9 @@ typedef struct janus_session {
 	/*! \brief Pointer to the request instance (and the transport that originated the session) */
 	janus_request *source;
 	/*! \brief Flag to notify there's been a session timeout */
-	volatile gint timeout;
+	volatile gint timedout;
+	/*! \brief Timeout value in seconds to use with this session, 0 is unlimited, -1 is global session timeout setting */
+	gint timeout;
 	/*! \brief Flag to notify that transport is gone */
 	volatile gint transport_gone;
 	/*! \brief Mutex to lock/unlock this session */

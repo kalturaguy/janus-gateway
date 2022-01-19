@@ -137,7 +137,7 @@ $(document).ready(function() {
 											if((substream !== null && substream !== undefined) || (temporal !== null && temporal !== undefined)) {
 												if(!simulcastStarted[mid]) {
 													simulcastStarted[mid] = true;
-													addSimulcastButtons(mid, temporal !== null && temporal !== undefined);
+													addSimulcastButtons(mid);
 												}
 												// We just received notice that there's been a switch, update the buttons
 												updateSimulcastButtons(mid, substream, temporal);
@@ -376,7 +376,7 @@ function updateStreamsList() {
 			streamsList = {};
 			for(var mp in list) {
 				Janus.debug("  >> [" + list[mp]["id"] + "] " + list[mp]["description"] + " (" + list[mp]["type"] + ")");
-				$('#streamslist').append("<li><a href='#' id='" + list[mp]["id"] + "'>" + list[mp]["description"] + " (" + list[mp]["type"] + ")" + "</a></li>");
+				$('#streamslist').append("<li><a href='#' id='" + list[mp]["id"] + "'>" + escapeXmlTags(list[mp]["description"]) + " (" + list[mp]["type"] + ")" + "</a></li>");
 				// Check the nature of the available streams, and if there are some multistream ones
 				list[mp].legacy = true;
 				if(list[mp].media) {
@@ -417,7 +417,7 @@ function getStreamInfo() {
 	var body = { request: "info", id: parseInt(selectedStream) || selectedStream };
 	streaming.send({ message: body, success: function(result) {
 		if(result && result.info && result.info.metadata) {
-			$('#metadata').html(result.info.metadata);
+			$('#metadata').html(escapeXmlTags(result.info.metadata));
 			$('#info').removeClass('hide').show();
 		}
 	}});
@@ -503,6 +503,15 @@ function stopStream() {
 	streaming.hangup();
 }
 
+// Helper to escape XML tags
+function escapeXmlTags(value) {
+	if(value) {
+		var escapedValue = value.replace(new RegExp('<', 'g'), '&lt');
+		escapedValue = escapedValue.replace(new RegExp('>', 'g'), '&gt');
+		return escapedValue;
+	}
+}
+
 // Helper to add a new panel to the 'videos' div
 function addPanel(panelId, mid, desc) {
 	$('#videos').append(
@@ -521,8 +530,17 @@ function addPanel(panelId, mid, desc) {
 	);
 }
 
+// Helper to escape XML tags
+function escapeXmlTags(value) {
+	if(value) {
+		var escapedValue = value.replace(new RegExp('<', 'g'), '&lt');
+		escapedValue = escapedValue.replace(new RegExp('>', 'g'), '&gt');
+		return escapedValue;
+	}
+}
+
 // Helpers to create Simulcast-related UI, if enabled
-function addSimulcastButtons(mid, temporal) {
+function addSimulcastButtons(mid) {
 	$('#curres'+mid).parent().append(
 		'<div id="simulcast'+mid+'" class="btn-group-vertical btn-group-vertical-xs pull-right">' +
 		'	<div class"row">' +
@@ -571,8 +589,7 @@ function addSimulcastButtons(mid, temporal) {
 				$('#m-'+mid+'-sl-0').removeClass('btn-primary btn-info').addClass('btn-primary');
 			streaming.send({ message: { request: "configure", mid: mid, substream: 2 }});
 		});
-	if(!temporal)	// No temporal layer support
-		return;
+	// We always add temporal layer buttons too, even though these will only work with vP8
 	$('#m-'+mid+'-tl-0').parent().removeClass('hide');
 	$('#m-'+mid+'-tl-0').removeClass('btn-primary btn-success').addClass('btn-primary')
 		.unbind('click').click(function() {
@@ -664,7 +681,7 @@ function addSvcButtons(mid) {
 		'	</div>' +
 		'</div>'
 	);
-	// Enable the VP8 simulcast selection buttons
+	// Enable the SVC selection buttons
 	$('#m-'+mid+'-sl-0').removeClass('btn-primary btn-success').addClass('btn-primary')
 		.unbind('click').click(function() {
 			toastr.info("Switching SVC spatial layer, wait for it... (low resolution)", null, {timeOut: 2000});

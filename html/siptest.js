@@ -148,7 +148,7 @@ $(document).ready(function() {
 								iceState: function(state) {
 									Janus.log("ICE state changed to " + state);
 								},
-								mediaState: function(medium, mid, on) {
+								mediaState: function(medium, on, mid) {
 									Janus.log("Janus " + (on ? "started" : "stopped") + " receiving our " + medium + " (mid=" + mid + ")");
 								},
 								webrtcState: function(on) {
@@ -452,17 +452,19 @@ $(document).ready(function() {
 											$('#call').removeAttr('disabled').html('Call')
 												.removeClass("btn-danger").addClass("btn-success")
 												.unbind('click').click(doCall);
+										} else if(event === 'messagedelivery') {
+											// message delivery status
+											let reason = result["reason"];
+											let code = result["code"];
+											let callid = msg['call_id'];
+											if (code == 200) {
+												toastr.success(`${callid} Delivery Status: ${code} ${reason}`);
+											} else {
+												toastr.error(`${callid} Delivery Status: ${code} ${reason}`);
+											}
 										}
 									}
 								},
-								onlocalstream: function(stream) {
-									Janus.debug(" ::: Got a local stream :::", stream);
-									$('#videos').removeClass('hide').show();
-									if($('#myvideo').length === 0)
-										$('#videoleft').append('<video class="rounded centered" id="myvideo" width="100%" height="100%" autoplay playsinline muted="muted"/>');
-									Janus.attachMediaStream($('#myvideo').get(0), stream);
-									$("#myvideo").get(0).muted = "muted";
-=======
 								onlocaltrack: function(track, on) {
 									Janus.debug("Local track " + (on ? "added" : "removed") + ":", track);
 									// We use the track ID as name of the element, but it may contain invalid characters
@@ -529,7 +531,6 @@ $(document).ready(function() {
 										$('#videoleft').append('<video class="rounded centered" id="myvideot' + trackId + '" width="100%" height="100%" autoplay playsinline muted="muted"/>');
 										Janus.attachMediaStream($('#myvideot' + trackId).get(0), stream);
 									}
->>>>>>> b8105ce3... Updated demos and janus.js to use tracks instead of streams
 									if(sipcall.webrtcStuff.pc.iceConnectionState !== "completed" &&
 											sipcall.webrtcStuff.pc.iceConnectionState !== "connected") {
 										$("#videoleft").parent().block({
@@ -925,14 +926,14 @@ function doCall(ev) {
 		bootbox.alert('Please insert a valid SIP address (e.g., sip:pluto@example.com)');
 		$('#peer' + suffix).removeAttr('disabled');
 		$('#dovideo' + suffix).removeAttr('disabled');
-		$('#call' + suffix).removeAttr('disabled').click(function() { doCall(helperId); });
+		$('#call' + suffix).removeAttr('disabled').click(function(ev) { doCall(ev); });
 		return;
 	}
 	if(username.indexOf("sip:") != 0 || username.indexOf("@") < 0) {
 		bootbox.alert('Please insert a valid SIP address (e.g., sip:pluto@example.com)');
 		$('#peer' + suffix).removeAttr('disabled').val("");
 		$('#dovideo' + suffix).removeAttr('disabled').val("");
-		$('#call' + suffix).removeAttr('disabled').click(function() { doCall(helperId); });
+		$('#call' + suffix).removeAttr('disabled').click(function(ev) { doCall(ev); });
 		return;
 	}
 	// Call this URI
@@ -1048,7 +1049,7 @@ function addHelper(helperCreated) {
 		'				<button disabled class="btn btn-success margin-bottom-sm" autocomplete="off" id="call' + helperId + '">Call</button> <input autocomplete="off" id="dovideo' + helperId + '" type="checkbox">Use Video</input>' +
 		'			</div>' +
 		'		</div>' +
-		'	<div/>' +
+		'	</div>' +
 		'	<div id="videos' + helperId + '" class="hide">' +
 		'		<div class="col-md-6">' +
 		'			<div class="panel panel-default">' +
@@ -1119,7 +1120,7 @@ function addHelper(helperCreated) {
 			iceState: function(state) {
 				Janus.log("[Helper #" + helperId + "] ICE state changed to " + state);
 			},
-			mediaState: function(medium, mid, on) {
+			mediaState: function(medium, on, mid) {
 				Janus.log("[Helper #" + helperId + "] Janus " + (on ? "started" : "stopped") + " receiving our " + medium + " (mid=" + mid + ")");
 			},
 			webrtcState: function(on) {
@@ -1401,6 +1402,16 @@ function addHelper(helperCreated) {
 						$('#call' + helperId).removeAttr('disabled').html('Call')
 							.removeClass("btn-danger").addClass("btn-success")
 							.unbind('click').click(doCall);
+					} else if(event === 'messagedelivery') {
+						// message delivery status
+						let reason = result["reason"];
+						let code = result["code"];
+						let callid = msg['call_id'];
+						if (code == 200) {
+							toastr.success(`${callid}/${helperId} Delivery Status: ${code} ${reason}`);
+						} else {
+							toastr.error(`${callid}/${helperId} Delivery Status: ${code} ${reason}`);
+						}
 					}
 				}
 			},

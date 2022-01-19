@@ -151,6 +151,7 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 			}
 			if(m->port > 0) {
 				JANUS_LOG(LOG_VERB, "[%"SCNu64"] Parsing m-line #%d...\n", handle->handle_id, m->index);
+				gboolean receiving = (medium->recv == TRUE);
 				switch(m->direction) {
 					case JANUS_SDP_INACTIVE:
 					case JANUS_SDP_INVALID:
@@ -174,6 +175,8 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 						medium->recv = TRUE;
 						break;
 				}
+				if(receiving != medium->recv)
+					janus_ice_notify_media_stopped(handle);
 				if(m->ptypes != NULL) {
 					g_list_free(medium->payload_types);
 					medium->payload_types = g_list_copy(m->ptypes);
@@ -252,12 +255,20 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 							handle->handle_id, m->index, strlen(a->value));
 						return -2;
 					}
-					if(medium->mid == NULL) {
+					gboolean mid_changed = FALSE;
+					if(medium->mid != NULL && strcasecmp(medium->mid, a->value))
+						mid_changed = TRUE;
+					if(medium->mid == NULL || mid_changed) {
+						char *old_mid = mid_changed ? medium->mid : NULL;
 						medium->mid = g_strdup(a->value);
 						if(!g_hash_table_lookup(pc->media_bymid, medium->mid)) {
 							g_hash_table_insert(pc->media_bymid, g_strdup(medium->mid), medium);
 							janus_refcount_increase(&medium->ref);
 						}
+						/* If the mid for this m-line changed, get rid of the mapping */
+						if(mid_changed && old_mid != NULL)
+							g_hash_table_remove(pc->media_bymid, old_mid);
+						g_free(old_mid);
 					}
 					if(handle->pc_mid == NULL)
 						handle->pc_mid = g_strdup(a->value);
@@ -545,11 +556,11 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 				}
 			}
 			if(m->type == JANUS_SDP_VIDEO) {
-				if(medium->ssrc_peer[1] && medium->rtcp_ctx[1] == NULL) {
+				if((medium->ssrc_peer[1] || medium->rid[1] != NULL) && medium->rtcp_ctx[1] == NULL) {
 					medium->rtcp_ctx[1] = g_malloc0(sizeof(rtcp_context));
 					medium->rtcp_ctx[1]->tb = 90000;
 				}
-				if(medium->ssrc_peer[2] && medium->rtcp_ctx[2] == NULL) {
+				if((medium->ssrc_peer[2] || medium->rid[rids_hml ? 2 : 0] != NULL) && medium->rtcp_ctx[2] == NULL) {
 					medium->rtcp_ctx[2] = g_malloc0(sizeof(rtcp_context));
 					medium->rtcp_ctx[2]->tb = 90000;
 				}
@@ -1149,7 +1160,6 @@ int janus_sdp_anonymize(janus_sdp *anon) {
 					|| !strcasecmp(a->name, "setup")
 					|| !strcasecmp(a->name, "connection")
 					|| !strcasecmp(a->name, "group")
-					|| !strcasecmp(a->name, "mid")
 					|| !strcasecmp(a->name, "msid")
 					|| !strcasecmp(a->name, "msid-semantic")
 					|| !strcasecmp(a->name, "rid")
@@ -1188,7 +1198,8 @@ int janus_sdp_anonymize(janus_sdp *anon) {
 		GList *purged_ptypes = NULL;
 		while(tempA) {
 			janus_sdp_attribute *a = (janus_sdp_attribute *)tempA->data;
-			if(a->value && (strstr(a->value, "red/90000") || strstr(a->value, "ulpfec/90000") || strstr(a->value, "rtx/90000"))) {
+			if(a->value && (strstr(a->value, "red/90000") || strstr(a->value, "ulpfec/90000") ||
+					strstr(a->value, "flexfec-03/90000") || strstr(a->value, "rtx/90000"))) {
 				int ptype = atoi(a->value);
 				if(ptype < 0) {
 					JANUS_LOG(LOG_ERR, "Invalid payload type (%d)\n", ptype);
@@ -1249,7 +1260,7 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 	g_free(anon->c_addr);
 	anon->c_addr = NULL;
 	/* bundle: add new global attribute */
-	char buffer[JANUS_BUFSIZE], buffer_part[512];
+	char buffer[8192], buffer_part[512];
 	buffer[0] = '\0';
 	buffer_part[0] = '\0';
 	g_snprintf(buffer, sizeof(buffer), "BUNDLE");
@@ -1264,7 +1275,7 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 		medium = g_hash_table_lookup(pc->media, GINT_TO_POINTER(m->index));
 		if(medium && m->port > 0) {
 			g_snprintf(buffer_part, sizeof(buffer_part), " %s", medium->mid);
-			g_strlcat(buffer, buffer_part, sizeof(buffer));
+			janus_strlcat(buffer, buffer_part, sizeof(buffer));
 		}
 		temp = temp->next;
 	}
@@ -1293,6 +1304,7 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 #ifdef HAVE_SCTP
 	data = 0;
 #endif
+	gboolean media_stopped = FALSE;
 	temp = anon->m_lines;
 	while(temp) {
 		janus_sdp_mline *m = (janus_sdp_mline *)temp->data;
@@ -1321,6 +1333,7 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 				m->direction = JANUS_SDP_INACTIVE;
 				medium->ssrc = 0;
 			}
+			gboolean receiving = (medium->recv == TRUE);
 			switch(m->direction) {
 				case JANUS_SDP_INACTIVE:
 					medium->send = FALSE;
@@ -1341,6 +1354,8 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 					medium->recv = TRUE;
 					break;
 			}
+			if(receiving != medium->recv)
+				media_stopped = TRUE;
 			if(medium->do_nacks && janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX)) {
 				/* Add RFC4588 stuff */
 				if(medium->rtx_payload_types && g_hash_table_size(medium->rtx_payload_types) > 0) {
@@ -1462,10 +1477,10 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 				a = janus_sdp_attribute_create("rid", "%s recv", medium->rid[index]);
 				m->attributes = g_list_append(m->attributes, a);
 				if(strlen(rids) == 0) {
-					g_strlcat(rids, medium->rid[index], sizeof(rids));
+					janus_strlcat(rids, medium->rid[index], sizeof(rids));
 				} else {
-					g_strlcat(rids, ";", sizeof(rids));
-					g_strlcat(rids, medium->rid[index], sizeof(rids));
+					janus_strlcat(rids, ";", sizeof(rids));
+					janus_strlcat(rids, medium->rid[index], sizeof(rids));
 				}
 			}
 			if(medium->legacy_rid) {
@@ -1487,6 +1502,8 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 		/* Next */
 		temp = temp->next;
 	}
+	if(media_stopped)
+		janus_ice_notify_media_stopped(handle);
 
 	char *sdp = janus_sdp_write(anon);
 

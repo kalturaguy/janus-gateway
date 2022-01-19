@@ -65,6 +65,7 @@ var doSimulcast2 = (getQueryStringValue("simulcast2") === "yes" || getQueryStrin
 var acodec = (getQueryStringValue("acodec") !== "" ? getQueryStringValue("acodec") : null);
 var vcodec = (getQueryStringValue("vcodec") !== "" ? getQueryStringValue("vcodec") : null);
 var vprofile = (getQueryStringValue("vprofile") !== "" ? getQueryStringValue("vprofile") : null);
+var doDtx = (getQueryStringValue("dtx") === "yes" || getQueryStringValue("dtx") === "true");
 var simulcastStarted = false;
 
 $(document).ready(function() {
@@ -125,6 +126,13 @@ $(document).ready(function() {
 											// the following 'simulcast' property to pass to janus.js to true
 											simulcast: doSimulcast,
 											simulcast2: doSimulcast2,
+											customizeSdp: function(jsep) {
+												// If DTX is enabled, munge the SDP
+												if(doDtx) {
+													jsep.sdp = jsep.sdp
+														.replace("useinbandfec=1", "useinbandfec=1;usedtx=1")
+												}
+											},
 											success: function(jsep) {
 												Janus.debug("Got SDP!", jsep);
 												echotest.send({ message: body, jsep: jsep });
@@ -169,7 +177,7 @@ $(document).ready(function() {
 								iceState: function(state) {
 									Janus.log("ICE state changed to " + state);
 								},
-								mediaState: function(medium, mid, on) {
+								mediaState: function(medium, on, mid) {
 									Janus.log("Janus " + (on ? "started" : "stopped") + " receiving our " + medium + " (mid=" + mid + ")");
 								},
 								webrtcState: function(on) {
@@ -215,7 +223,7 @@ $(document).ready(function() {
 									if((substream !== null && substream !== undefined) || (temporal !== null && temporal !== undefined)) {
 										if(!simulcastStarted) {
 											simulcastStarted = true;
-											addSimulcastButtons(msg["videocodec"] === "vp8" || msg["videocodec"] === "h264");
+											addSimulcastButtons(msg["videocodec"] === "vp8");
 										}
 										// We just received notice that there's been a switch, update the buttons
 										updateSimulcastButtons(substream, temporal);
@@ -371,7 +379,7 @@ $(document).ready(function() {
 										if(!bitrateTimer) {
 											$('#curbitrate').removeClass('hide').show();
 											bitrateTimer = setInterval(function() {
-												if(!$("#peervideo" + mid + ' video').get(0))
+												if(!$("#peervideo" + mid).get(0))
 													return;
 												// Display updated bitrate, if supported
 												var bitrate = echotest.getBitrate();
@@ -522,6 +530,12 @@ function addSimulcastButtons(temporal) {
 		'		</div>' +
 		'	</div>' +
 		'</div>');
+	if(Janus.webRTCAdapter.browserDetails.browser !== "firefox") {
+		// Chromium-based browsers only have two temporal layers
+		$('#tl-2').remove();
+		$('#tl-1').css('width', '50%');
+		$('#tl-0').css('width', '50%');
+	}
 	// Enable the simulcast selection buttons
 	$('#sl-0').removeClass('btn-primary btn-success').addClass('btn-primary')
 		.unbind('click').click(function() {

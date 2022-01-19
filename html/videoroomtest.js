@@ -67,6 +67,9 @@ var bitrateTimer = [];
 
 var doSimulcast = (getQueryStringValue("simulcast") === "yes" || getQueryStringValue("simulcast") === "true");
 var doSimulcast2 = (getQueryStringValue("simulcast2") === "yes" || getQueryStringValue("simulcast2") === "true");
+var acodec = (getQueryStringValue("acodec") !== "" ? getQueryStringValue("acodec") : null);
+var vcodec = (getQueryStringValue("vcodec") !== "" ? getQueryStringValue("vcodec") : null);
+var doDtx = (getQueryStringValue("dtx") === "yes" || getQueryStringValue("dtx") === "true");
 var subscriber_mode = (getQueryStringValue("subscriber-mode") === "yes" || getQueryStringValue("subscriber-mode") === "true");
 
 $(document).ready(function() {
@@ -132,7 +135,7 @@ $(document).ready(function() {
 								iceState: function(state) {
 									Janus.log("ICE state changed to " + state);
 								},
-								mediaState: function(medium, mid, on) {
+								mediaState: function(medium, on, mid) {
 									Janus.log("Janus " + (on ? "started" : "stopped") + " receiving our " + medium + " (mid=" + mid + ")");
 								},
 								webrtcState: function(on) {
@@ -466,7 +469,7 @@ function registerUsername() {
 			ptype: "publisher",
 			display: username
 		};
-		myusername = username;
+		myusername = escapeXmlTags(username);
 		sfutest.send({ message: register });
 	}
 }
@@ -483,6 +486,13 @@ function publishOwnFeed(useAudio) {
 			// the following 'simulcast' property to pass to janus.js to true
 			simulcast: doSimulcast,
 			simulcast2: doSimulcast2,
+			customizeSdp: function(jsep) {
+				// If DTX is enabled, munge the SDP
+				if(doDtx) {
+					jsep.sdp = jsep.sdp
+						.replace("useinbandfec=1", "useinbandfec=1;usedtx=1")
+				}
+			},
 			success: function(jsep) {
 				Janus.debug("Got publisher SDP!", jsep);
 				var publish = { request: "configure", audio: useAudio, video: true };
@@ -495,7 +505,12 @@ function publishOwnFeed(useAudio) {
 				// a codec will only work if: (1) the codec is actually in the SDP (and
 				// so the browser supports it), and (2) the codec is in the list of
 				// allowed codecs in a room. With respect to the point (2) above,
-				// refer to the text in janus.plugin.videoroom.jcfg for more details
+				// refer to the text in janus.plugin.videoroom.jcfg for more details.
+				// We allow people to specify a codec via query string, for demo purposes
+				if(acodec)
+					publish["audiocodec"] = acodec;
+				if(vcodec)
+					publish["videocodec"] = vcodec;
 				sfutest.send({ message: publish, jsep: jsep });
 			},
 			error: function(error) {
@@ -562,7 +577,7 @@ function newRemoteFeed(id, display, streams) {
 					});
 					// FIXME Right now, this is always the same feed: in the future, it won't
 					remoteFeed.rfid = stream.id;
-					remoteFeed.rfdisplay = stream.display;
+					remoteFeed.rfdisplay = escapeXmlTags(stream.display);
 				}
 				// We wait for the plugin to send us an offer
 				var subscribe = {
@@ -620,7 +635,7 @@ function newRemoteFeed(id, display, streams) {
 							if(!remoteFeed.simulcastStarted) {
 								remoteFeed.simulcastStarted = true;
 								// Add some new buttons
-								addSimulcastButtons(remoteFeed.rfindex, remoteFeed.videoCodec === "vp8" || remoteFeed.videoCodec === "h264");
+								addSimulcastButtons(remoteFeed.rfindex, true);
 							}
 							// We just received notice that there's been a switch, update the buttons
 							updateSimulcastButtons(remoteFeed.rfindex, substream, temporal);
@@ -631,6 +646,7 @@ function newRemoteFeed(id, display, streams) {
 				}
 				if(jsep) {
 					Janus.debug("Handling SDP as well...", jsep);
+					var stereo = (jsep.sdp.indexOf("stereo=1") !== -1);
 					// Answer and attach
 					remoteFeed.createAnswer(
 						{
@@ -638,6 +654,12 @@ function newRemoteFeed(id, display, streams) {
 							// Add data:true here if you want to subscribe to datachannels as well
 							// (obviously only works if the publisher offered them in the first place)
 							media: { audioSend: false, videoSend: false },	// We want recvonly audio/video
+							customizeSdp: function(jsep) {
+								if(stereo && jsep.sdp.indexOf("stereo=1") == -1) {
+									// Make sure that our offer contains stereo too
+									jsep.sdp = jsep.sdp.replace("useinbandfec=1", "useinbandfec=1;stereo=1");
+								}
+							},
 							success: function(jsep) {
 								Janus.debug("Got SDP!", jsep);
 								var body = { request: "start", room: myroom };
@@ -770,6 +792,15 @@ function getQueryStringValue(name) {
 	return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
 }
 
+// Helper to escape XML tags
+function escapeXmlTags(value) {
+	if(value) {
+		var escapedValue = value.replace(new RegExp('<', 'g'), '&lt');
+		escapedValue = escapedValue.replace(new RegExp('>', 'g'), '&gt');
+		return escapedValue;
+	}
+}
+
 // Helpers to create Simulcast-related UI, if enabled
 function addSimulcastButtons(feed, temporal) {
 	var index = feed;
@@ -791,6 +822,12 @@ function addSimulcastButtons(feed, temporal) {
 		'	</div>' +
 		'</div>'
 	);
+	if(Janus.webRTCAdapter.browserDetails.browser !== "firefox") {
+		// Chromium-based browsers only have two temporal layers
+		$('#tl'+index+'-2').remove();
+		$('#tl'+index+'-1').css('width', '50%');
+		$('#tl'+index+'-0').css('width', '50%');
+	}
 	// Enable the simulcast selection buttons
 	$('#sl' + index + '-0').removeClass('btn-primary btn-success').addClass('btn-primary')
 		.unbind('click').click(function() {

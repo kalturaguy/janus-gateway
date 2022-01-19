@@ -140,12 +140,12 @@ $(document).ready(function() {
 								iceState: function(state) {
 									Janus.log("ICE state changed to " + state);
 								},
-								mediaState: function(medium, mid, on) {
+								mediaState: function(medium, on, mid) {
 									Janus.log("Janus " + (on ? "started" : "stopped") + " receiving our " + medium + " (mid=" + mid + ")");
 								},
 								webrtcState: function(on) {
 									Janus.log("Janus says our WebRTC PeerConnection is " + (on ? "up" : "down") + " now");
-									$("#screencapture").parent().unblock();
+									$("#screencapture").parent().parent().unblock();
 									if(on) {
 										bootbox.alert("Your screen sharing session just started: pass the <b>" + room + "</b> session identifier to those who want to attend.");
 									} else {
@@ -167,7 +167,7 @@ $(document).ready(function() {
 										if(event === "joined") {
 											myid = msg["id"];
 											$('#session').html(room);
-											$('#title').html(msg["description"]);
+											$('#title').html(escapeXmlTags(msg["description"]));
 											Janus.log("Successfully joined room " + msg["room"] + " with ID " + myid);
 											if(role === "publisher") {
 												// This is our session, publish our stream
@@ -289,6 +289,7 @@ $(document).ready(function() {
 										return;
 									}
 									$('#screenmenu').hide();
+									$('#room').removeClass('hide').show();
 									if(track.kind === "audio") {
 										// We ignore local audio tracks, they'd generate echo anyway
 										if(localVideos === 0) {
@@ -501,7 +502,7 @@ function newRemoteFeed(id, display) {
 				var listen = {
 					request: "join",
 					room: room,
-					ptype: "listener",
+					ptype: "subscriber",
 					feed: id
 				};
 				remoteFeed.send({ message: listen });
@@ -645,4 +646,13 @@ function newRemoteFeed(id, display) {
 				remoteFeed.remoteVideos = 0;
 			}
 		});
+}
+
+// Helper to escape XML tags
+function escapeXmlTags(value) {
+	if(value) {
+		var escapedValue = value.replace(new RegExp('<', 'g'), '&lt');
+		escapedValue = escapedValue.replace(new RegExp('>', 'g'), '&gt');
+		return escapedValue;
+	}
 }

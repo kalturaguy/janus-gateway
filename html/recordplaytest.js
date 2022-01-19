@@ -133,7 +133,7 @@ $(document).ready(function() {
 								iceState: function(state) {
 									Janus.log("ICE state changed to " + state);
 								},
-								mediaState: function(medium, mid, on) {
+								mediaState: function(medium, on, mid) {
 									Janus.log("Janus " + (on ? "started" : "stopped") + " receiving our " + medium + " (mid=" + mid + ")");
 								},
 								webrtcState: function(on) {
@@ -176,19 +176,6 @@ $(document).ready(function() {
 												if(id) {
 													Janus.log("The ID of the current recording is " + id);
 													recordingId = id;
-												}
-											} else if(event === 'slow_link') {
-												var uplink = result["uplink"];
-												if(uplink !== 0) {
-													// Janus detected issues when receiving our media, let's slow down
-													bandwidth = parseInt(bandwidth / 1.5);
-													recordplay.send({
-														message: {
-															request: 'configure',
-															'video-bitrate-max': bandwidth,		// Reduce the bitrate
-															'video-keyframe-interval': 15000	// Keep the 15 seconds key frame interval
-														}
-													});
 												}
 											} else if(event === 'playing') {
 												Janus.log("Playout has started!");
@@ -392,6 +379,26 @@ $(document).ready(function() {
 										Janus.log("Created remote video stream:", stream);
 										$('#videobox').append('<video class="rounded centered" id="thevideo' + mid + '" width="100%" height="100%" autoplay playsinline/>');
 										Janus.attachMediaStream($('#thevideo' + mid).get(0), stream);
+										if($('#curres').length === 0) {
+											$('#videobox').append(
+												'<span class="label label-primary" id="curres' +'" style="position: absolute; bottom: 0px; left: 0px; margin: 15px;"></span>' +
+												'<span class="label label-info" id="curbw' +'" style="position: absolute; bottom: 0px; right: 0px; margin: 15px;"></span>');
+											$('#thevideo' + mid).bind("playing", function () {
+												var width = this.videoWidth;
+												var height = this.videoHeight;
+												$('#curres').text(width + 'x' + height);
+											});
+											recordplay.bitrateTimer = setInterval(function() {
+												// Display updated bitrate, if supported
+												var bitrate = recordplay.getBitrate();
+												$('#curbw').text(bitrate);
+												var video = $('video').get(0);
+												var width = video.videoWidth;
+												var height = video.videoHeight;
+												if(width > 0 && height > 0)
+													$('#curres').text(width + 'x' + height);
+											}, 1000);
+										}
 									}
 								},
 								ondataopen: function(data) {
@@ -415,6 +422,9 @@ $(document).ready(function() {
 									if(spinner)
 										spinner.stop();
 									spinner = null;
+									if(recordplay.bitrateTimer)
+										clearInterval(recordplay.bitrateTimer);
+									delete recordplay.bitrateTimer;
 									$('#videobox').empty();
 									$("#videobox").parent().unblock();
 									$('#video').hide();
@@ -495,11 +505,11 @@ function updateRecsList() {
 			Janus.debug("Got a list of available recordings:", list);
 			for(var mp in list) {
 				Janus.debug("  >> [" + list[mp]["id"] + "] " + list[mp]["name"] + " (" + list[mp]["date"] + ")");
-				$('#recslist').append("<li><a href='#' id='" + list[mp]["id"] + "'>" + list[mp]["name"] + " [" + list[mp]["date"] + "]" + "</a></li>");
+				$('#recslist').append("<li><a href='#' id='" + list[mp]["id"] + "'>" + escapeXmlTags(list[mp]["name"]) + " [" + list[mp]["date"] + "]" + "</a></li>");
 			}
 			$('#recslist a').unbind('click').click(function() {
 				selectedRecording = $(this).attr("id");
-				selectedRecordingInfo = $(this).text();
+				selectedRecordingInfo = escapeXmlTags($(this).text());
 				$('#recset').html($(this).html()).parent().removeClass('open');
 				$('#play').removeAttr('disabled').click(startPlayout);
 				return false;
@@ -525,6 +535,7 @@ function startRecording() {
 		$('#list').unbind('click').attr('disabled', true);
 		$('#recset').attr('disabled', true);
 		$('#recslist').attr('disabled', true);
+		$('#pause-resume').removeClass('hide');
 
 		// bitrate and keyframe interval can be set at any time:
 		// before, after, during recording
@@ -569,6 +580,15 @@ function startRecording() {
 					recordplay.hangup();
 				}
 			});
+		$('#pause-resume').unbind('click').on('click', function() {
+			if($(this).text() === 'Pause') {
+				recordplay.send({message: {request: 'pause'}});
+				$(this).text('Resume');
+			} else {
+				recordplay.send({message: {request: 'resume'}});
+				$(this).text('Pause');
+			}
+		});
 	});
 }
 
@@ -587,6 +607,7 @@ function startPlayout() {
 	$('#list').unbind('click').attr('disabled', true);
 	$('#recset').attr('disabled', true);
 	$('#recslist').attr('disabled', true);
+	$('#pause-resume').addClass('hide');
 	var play = { request: "play", id: parseInt(selectedRecording) };
 	recordplay.send({ message: play });
 }
@@ -605,4 +626,13 @@ function getQueryStringValue(name) {
 	var regex = new RegExp("[\\?&]" + name + "=([^&#]*)"),
 		results = regex.exec(location.search);
 	return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
+}
+
+// Helper to escape XML tags
+function escapeXmlTags(value) {
+	if(value) {
+		var escapedValue = value.replace(new RegExp('<', 'g'), '&lt');
+		escapedValue = escapedValue.replace(new RegExp('>', 'g'), '&gt');
+		return escapedValue;
+	}
 }
