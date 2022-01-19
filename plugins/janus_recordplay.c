@@ -418,6 +418,7 @@ typedef struct janus_recordplay_recording {
 	char *offer;				/* The SDP offer that will be sent to watchers */
 	gboolean e2ee;				/* Whether media in the recording is encrypted, e.g., using Insertable Streams */
 	GList *viewers;				/* List of users watching this recording */
+	volatile gint paused;		/* Whether this recording is paused */
 	volatile gint completed;	/* Whether this recording was completed or still going on */
 	volatile gint destroyed;	/* Whether this recording has been marked as destroyed */
 	janus_refcount ref;			/* Reference counter */
@@ -580,7 +581,7 @@ static const char *janus_recordplay_parse_codec(const char *dir, const char *fil
 				/* This is the info header */
 				bytes = fread(prebuffer, sizeof(char), len, file);
 				if(bytes < 0) {
-					JANUS_LOG(LOG_ERR, "Error reading from file... %s\n", strerror(errno));
+					JANUS_LOG(LOG_ERR, "Error reading from file... %s\n", g_strerror(errno));
 					fclose(file);
 					return NULL;
 				}
@@ -814,7 +815,7 @@ int janus_recordplay_init(janus_callbacks *callback, const char *config_path) {
 		int res = janus_mkdir(recordings_path, 0755);
 		JANUS_LOG(LOG_VERB, "Creating folder: %d\n", res);
 		if(res != 0) {
-			JANUS_LOG(LOG_ERR, "%s", strerror(errno));
+			JANUS_LOG(LOG_ERR, "%s", g_strerror(errno));
 			return -1;	/* No point going on... */
 		}
 	}
@@ -1104,7 +1105,8 @@ struct janus_plugin_result *janus_recordplay_handle_message(janus_plugin_session
 		json_object_set_new(response, "settings", settings);
 		goto plugin_response;
 	} else if(!strcasecmp(request_text, "record") || !strcasecmp(request_text, "play")
-			|| !strcasecmp(request_text, "start") || !strcasecmp(request_text, "stop")) {
+			|| !strcasecmp(request_text, "start") || !strcasecmp(request_text, "stop")
+			|| !strcasecmp(request_text, "pause") || !strcasecmp(request_text, "resume")) {
 		/* These messages are handled asynchronously */
 		janus_recordplay_message *msg = g_malloc(sizeof(janus_recordplay_message));
 		msg->handle = handle;
@@ -1582,6 +1584,7 @@ static void *janus_recordplay_handler(void *data) {
 				/* Renegotiation: make sure the user provided an offer, and send answer */
 				JANUS_LOG(LOG_VERB, "Request to update existing recorder\n");
 				if(!session->recorder || !session->recording) {
+					janus_sdp_destroy(offer);
 					JANUS_LOG(LOG_ERR, "Not a recording session, can't update\n");
 					error_code = JANUS_RECORDPLAY_ERROR_INVALID_STATE;
 					g_snprintf(error_cause, 512, "Not a recording session, can't update");
@@ -1633,6 +1636,7 @@ static void *janus_recordplay_handler(void *data) {
 			rec->acodec = JANUS_AUDIOCODEC_NONE;
 			rec->vcodec = JANUS_VIDEOCODEC_NONE;
 			rec->e2ee = e2ee;
+			g_atomic_int_set(&rec->paused, 0);
 			g_atomic_int_set(&rec->destroyed, 0);
 			g_atomic_int_set(&rec->completed, 0);
 			janus_refcount_init(&rec->ref, janus_recordplay_recording_free);
@@ -1820,10 +1824,9 @@ recdone:
 			json_t *msg_simulcast = json_object_get(msg->jsep, "simulcast");
 			if(msg_simulcast) {
 				JANUS_LOG(LOG_VERB, "Recording client negotiated simulcasting\n");
-				int rid_ext_id = -1, framemarking_ext_id = -1;
-				janus_rtp_simulcasting_prepare(msg_simulcast, &rid_ext_id, &framemarking_ext_id, session->ssrc, session->rid);
+				int rid_ext_id = -1;
+				janus_rtp_simulcasting_prepare(msg_simulcast, &rid_ext_id, session->ssrc, session->rid);
 				session->sim_context.rid_ext_id = rid_ext_id;
-				session->sim_context.framemarking_ext_id = framemarking_ext_id;
 				session->sim_context.substream_target = 2;	/* Let's aim for the highest quality */
 				session->sim_context.templayer_target = 2;	/* Let's aim for all temporal layers */
 				if(rec->vcodec != JANUS_VIDEOCODEC_VP8 && rec->vcodec != JANUS_VIDEOCODEC_H264) {
@@ -2007,6 +2010,35 @@ playdone:
 			}
 			/* Tell the core to tear down the PeerConnection, hangup_media will do the rest */
 			gateway->close_pc(session->handle);
+		} else if (!strcasecmp(request_text, "pause") || !strcasecmp(request_text, "resume")) {
+			JANUS_LOG(LOG_VERB, "Record&Play: Got pause/resume request\n");
+			if(session->recording) {
+				gboolean pause = !strcasecmp(request_text, "pause");
+				result = json_object();
+				json_object_set_new(result, "status", json_string(pause ? "paused" : "resumed"));
+				json_object_set_new(result, "id", json_integer(session->recording->id));
+				/* Also notify event handlers */
+				if(notify_events && gateway->events_is_enabled()) {
+					json_t *info = json_object();
+					json_object_set_new(info, "event", json_string(pause ? "paused" : "resumed"));
+					json_object_set_new(info, "id", json_integer(session->recording->id));
+					gateway->notify_event(&janus_recordplay_plugin, session->handle, info);
+				}
+				if (g_atomic_int_compare_and_exchange(&session->recording->paused, !pause, pause)) {
+					if(pause) {
+						janus_recorder_pause(session->arc);
+						janus_recorder_pause(session->vrc);
+						janus_recorder_pause(session->drc);
+					} else {
+						janus_recorder_resume(session->arc);
+						janus_recorder_resume(session->vrc);
+						janus_recorder_resume(session->drc);
+						gateway->send_pli(session->handle);
+					}
+				}
+			} else {
+				JANUS_LOG(LOG_VERB, "Record&Play: Not recording, ignoring pause/resume request\n");
+			}
 		} else {
 			JANUS_LOG(LOG_ERR, "Unknown request '%s'\n", request_text);
 			error_code = JANUS_RECORDPLAY_ERROR_INVALID_REQUEST;
@@ -2203,6 +2235,7 @@ void janus_recordplay_update_recordings_list(void) {
 		if(janus_recordplay_generate_offer(rec) < 0) {
 			JANUS_LOG(LOG_WARN, "Could not generate offer for recording %"SCNu64"...\n", rec->id);
 		}
+		g_atomic_int_set(&rec->paused, 0);
 		g_atomic_int_set(&rec->destroyed, 0);
 		g_atomic_int_set(&rec->completed, 1);
 		janus_refcount_init(&rec->ref, janus_recordplay_recording_free);
@@ -2317,7 +2350,7 @@ janus_recordplay_frame_packet *janus_recordplay_get_frames(const char *dir, cons
 				JANUS_LOG(LOG_VERB, "New .mjr header format\n");
 				bytes = fread(prebuffer, sizeof(char), len, file);
 				if(bytes < 0) {
-					JANUS_LOG(LOG_ERR, "Error reading from file... %s\n", strerror(errno));
+					JANUS_LOG(LOG_ERR, "Error reading from file... %s\n", g_strerror(errno));
 					fclose(file);
 					return NULL;
 				}

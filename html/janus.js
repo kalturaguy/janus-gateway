@@ -1,3 +1,5 @@
+"use strict";
+
 /*
 	The MIT License (MIT)
 
@@ -137,8 +139,12 @@ Janus.useDefaultDependencies = function (deps) {
 				if(response.ok) {
 					if(typeof(options.success) === typeof(Janus.noop)) {
 						return response.json().then(function(parsed) {
-							options.success(parsed);
-						}).catch(function(error) {
+							try {
+								options.success(parsed);
+							} catch(error) {
+								Janus.error('Unhandled httpAPICall success callback error', error);
+							}
+						}, function(error) {
 							return p.reject({message: 'Failed to parse response body', error: error, response: response});
 						});
 					}
@@ -226,8 +232,8 @@ Janus.init = function(options) {
 		// Already initialized
 		options.callback();
 	} else {
-		if(typeof console == "undefined" || typeof console.log == "undefined") {
-			console = { log: function() {} };
+		if(typeof console.log == "undefined") {
+			console.log = function() {};
 		}
 		// Console logging (all debugging disabled by default)
 		Janus.trace = Janus.noop;
@@ -333,7 +339,7 @@ Janus.init = function(options) {
 		var iOS = ['iPad', 'iPhone', 'iPod'].indexOf(navigator.platform) >= 0;
 		var eventName = iOS ? 'pagehide' : 'beforeunload';
 		var oldOBF = window["on" + eventName];
-		window.addEventListener(eventName, function(event) {
+		window.addEventListener(eventName, function() {
 			Janus.log("Closing window");
 			for(var s in Janus.sessions) {
 				if(Janus.sessions[s] && Janus.sessions[s].destroyOnUnload) {
@@ -605,9 +611,9 @@ function Janus(gatewayCallbacks) {
 			// Just info on the Janus instance
 			Janus.debug("Got info on the Janus instance");
 			Janus.debug(json);
-			var transaction = json["transaction"];
+			const transaction = json["transaction"];
 			if(transaction) {
-				var reportSuccess = transactions[transaction];
+				const reportSuccess = transactions[transaction];
 				if(reportSuccess)
 					reportSuccess(json);
 				delete transactions[transaction];
@@ -617,9 +623,9 @@ function Janus(gatewayCallbacks) {
 			// Just an ack, we can probably ignore
 			Janus.debug("Got an ack on session " + sessionId);
 			Janus.debug(json);
-			var transaction = json["transaction"];
+			const transaction = json["transaction"];
 			if(transaction) {
-				var reportSuccess = transactions[transaction];
+				const reportSuccess = transactions[transaction];
 				if(reportSuccess)
 					reportSuccess(json);
 				delete transactions[transaction];
@@ -629,9 +635,9 @@ function Janus(gatewayCallbacks) {
 			// Success!
 			Janus.debug("Got a success on session " + sessionId);
 			Janus.debug(json);
-			var transaction = json["transaction"];
+			const transaction = json["transaction"];
 			if(transaction) {
-				var reportSuccess = transactions[transaction];
+				const reportSuccess = transactions[transaction];
 				if(reportSuccess)
 					reportSuccess(json);
 				delete transactions[transaction];
@@ -639,12 +645,12 @@ function Janus(gatewayCallbacks) {
 			return;
 		} else if(json["janus"] === "trickle") {
 			// We got a trickle candidate from Janus
-			var sender = json["sender"];
+			const sender = json["sender"];
 			if(!sender) {
 				Janus.warn("Missing sender...");
 				return;
 			}
-			var pluginHandle = pluginHandles[sender];
+			const pluginHandle = pluginHandles[sender];
 			if(!pluginHandle) {
 				Janus.debug("This handle is not attached to this session");
 				return;
@@ -675,12 +681,12 @@ function Janus(gatewayCallbacks) {
 			// The PeerConnection with the server is up! Notify this
 			Janus.debug("Got a webrtcup event on session " + sessionId);
 			Janus.debug(json);
-			var sender = json["sender"];
+			const sender = json["sender"];
 			if(!sender) {
 				Janus.warn("Missing sender...");
 				return;
 			}
-			var pluginHandle = pluginHandles[sender];
+			const pluginHandle = pluginHandles[sender];
 			if(!pluginHandle) {
 				Janus.debug("This handle is not attached to this session");
 				return;
@@ -691,12 +697,12 @@ function Janus(gatewayCallbacks) {
 			// A plugin asked the core to hangup a PeerConnection on one of our handles
 			Janus.debug("Got a hangup event on session " + sessionId);
 			Janus.debug(json);
-			var sender = json["sender"];
+			const sender = json["sender"];
 			if(!sender) {
 				Janus.warn("Missing sender...");
 				return;
 			}
-			var pluginHandle = pluginHandles[sender];
+			const pluginHandle = pluginHandles[sender];
 			if(!pluginHandle) {
 				Janus.debug("This handle is not attached to this session");
 				return;
@@ -707,29 +713,28 @@ function Janus(gatewayCallbacks) {
 			// A plugin asked the core to detach one of our handles
 			Janus.debug("Got a detached event on session " + sessionId);
 			Janus.debug(json);
-			var sender = json["sender"];
+			const sender = json["sender"];
 			if(!sender) {
 				Janus.warn("Missing sender...");
 				return;
 			}
-			var pluginHandle = pluginHandles[sender];
+			const pluginHandle = pluginHandles[sender];
 			if(!pluginHandle) {
 				// Don't warn here because destroyHandle causes this situation.
 				return;
 			}
-			pluginHandle.detached = true;
 			pluginHandle.ondetached();
 			pluginHandle.detach();
 		} else if(json["janus"] === "media") {
 			// Media started/stopped flowing
 			Janus.debug("Got a media event on session " + sessionId);
 			Janus.debug(json);
-			var sender = json["sender"];
+			const sender = json["sender"];
 			if(!sender) {
 				Janus.warn("Missing sender...");
 				return;
 			}
-			var pluginHandle = pluginHandles[sender];
+			const pluginHandle = pluginHandles[sender];
 			if(!pluginHandle) {
 				Janus.debug("This handle is not attached to this session");
 				return;
@@ -739,12 +744,12 @@ function Janus(gatewayCallbacks) {
 			Janus.debug("Got a slowlink event on session " + sessionId);
 			Janus.debug(json);
 			// Trouble uplink or downlink
-			var sender = json["sender"];
+			const sender = json["sender"];
 			if(!sender) {
 				Janus.warn("Missing sender...");
 				return;
 			}
-			var pluginHandle = pluginHandles[sender];
+			const pluginHandle = pluginHandles[sender];
 			if(!pluginHandle) {
 				Janus.debug("This handle is not attached to this session");
 				return;
@@ -766,7 +771,7 @@ function Janus(gatewayCallbacks) {
 		} else if(json["janus"] === "event") {
 			Janus.debug("Got a plugin event on session " + sessionId);
 			Janus.debug(json);
-			var sender = json["sender"];
+			const sender = json["sender"];
 			if(!sender) {
 				Janus.warn("Missing sender...");
 				return;
@@ -779,7 +784,7 @@ function Janus(gatewayCallbacks) {
 			Janus.debug("  -- Event is coming from " + sender + " (" + plugindata["plugin"] + ")");
 			var data = plugindata["data"];
 			Janus.debug(data);
-			var pluginHandle = pluginHandles[sender];
+			const pluginHandle = pluginHandles[sender];
 			if(!pluginHandle) {
 				Janus.warn("This handle is not attached to this session");
 				return;
@@ -1098,7 +1103,7 @@ function Janus(gatewayCallbacks) {
 						gatewayCallbacks.destroyed();
 				}
 			};
-			var onUnbindError = function(event) {
+			var onUnbindError = function() {
 				unbindWebSocket();
 				callbacks.error("Failed to destroy the server: Is the server down?");
 				if(notifyDestroyed)
@@ -1149,6 +1154,7 @@ function Janus(gatewayCallbacks) {
 		callbacks = callbacks || {};
 		callbacks.success = (typeof callbacks.success == "function") ? callbacks.success : Janus.noop;
 		callbacks.error = (typeof callbacks.error == "function") ? callbacks.error : Janus.noop;
+		callbacks.dataChannelOptions = callbacks.dataChannelOptions || { ordered: true };
 		callbacks.consentDialog = (typeof callbacks.consentDialog == "function") ? callbacks.consentDialog : Janus.noop;
 		callbacks.iceState = (typeof callbacks.iceState == "function") ? callbacks.iceState : Janus.noop;
 		callbacks.mediaState = (typeof callbacks.mediaState == "function") ? callbacks.mediaState : Janus.noop;
@@ -1173,9 +1179,10 @@ function Janus(gatewayCallbacks) {
 			return;
 		}
 		var opaqueId = callbacks.opaqueId;
+		var loopIndex = callbacks.loopIndex;
 		var handleToken = callbacks.token ? callbacks.token : token;
 		var transaction = Janus.randomString(12);
-		var request = { "janus": "attach", "plugin": plugin, "opaque_id": opaqueId, "transaction": transaction };
+		var request = { "janus": "attach", "plugin": plugin, "opaque_id": opaqueId, "loop_index": loopIndex, "transaction": transaction };
 		if(handleToken)
 			request["token"] = handleToken;
 		if(apisecret)
@@ -1205,6 +1212,7 @@ function Janus(gatewayCallbacks) {
 							mySdp : null,
 							mediaConstraints : null,
 							pc : null,
+							dataChannelOptions: callbacks.dataChannelOptions,
 							dataChannel : {},
 							dtmfSender : null,
 							trickle : true,
@@ -1290,6 +1298,7 @@ function Janus(gatewayCallbacks) {
 							mySdp : null,
 							mediaConstraints : null,
 							pc : null,
+							dataChannelOptions: callbacks.dataChannelOptions,
 							dataChannel : {},
 							dtmfSender : null,
 							trickle : true,
@@ -1386,6 +1395,8 @@ function Janus(gatewayCallbacks) {
 				request.jsep.e2ee = true;
 			if(jsep.rid_order === "hml" || jsep.rid_order === "lmh")
 				request.jsep.rid_order = jsep.rid_order;
+			if(jsep.force_relay)
+				request.jsep.force_relay = true;
 		}
 		Janus.debug("Sending message to plugin (handle=" + handleId + "):");
 		Janus.debug(request);
@@ -1552,7 +1563,7 @@ function Janus(gatewayCallbacks) {
 		};
 		if(!incoming) {
 			// FIXME Add options (ordered, maxRetransmits, etc.)
-			var dcoptions = { ordered: true };
+			var dcoptions = config.dataChannelOptions;
 			if(dcprotocol)
 				dcoptions.protocol = dcprotocol;
 			config.dataChannel[dclabel] = config.pc.createDataChannel(dclabel, dcoptions);
@@ -1675,6 +1686,7 @@ function Janus(gatewayCallbacks) {
 			callbacks.success();
 			return;
 		}
+		pluginHandle.detached = true;
 		if(noRequest) {
 			// We're only removing the handle locally
 			delete pluginHandles[handleId];
@@ -1741,7 +1753,7 @@ function Janus(gatewayCallbacks) {
 		}
 		// We're now capturing the new stream: check if we're updating or if it's a new thing
 		var addTracks = false;
-		if(!config.myStream || !media.update || config.streamExternal) {
+		if(!config.myStream || !media.update || (config.streamExternal && !media.replaceAudio && !media.replaceVideo)) {
 			config.myStream = stream;
 			addTracks = true;
 		} else {
@@ -1753,9 +1765,9 @@ function Janus(gatewayCallbacks) {
 					// Use Transceivers
 					Janus.log((media.replaceAudio ? "Replacing" : "Adding") + " audio track:", stream.getAudioTracks()[0]);
 					var audioTransceiver = null;
-					var transceivers = config.pc.getTransceivers();
+					const transceivers = config.pc.getTransceivers();
 					if(transceivers && transceivers.length > 0) {
-						for(var t of transceivers) {
+						for(const t of transceivers) {
 							if((t.sender && t.sender.track && t.sender.track.kind === "audio") ||
 									(t.receiver && t.receiver.track && t.receiver.track.kind === "audio")) {
 								audioTransceiver = t;
@@ -1780,9 +1792,9 @@ function Janus(gatewayCallbacks) {
 					// Use Transceivers
 					Janus.log((media.replaceVideo ? "Replacing" : "Adding") + " video track:", stream.getVideoTracks()[0]);
 					var videoTransceiver = null;
-					var transceivers = config.pc.getTransceivers();
+					const transceivers = config.pc.getTransceivers();
 					if(transceivers && transceivers.length > 0) {
-						for(var t of transceivers) {
+						for(const t of transceivers) {
 							if((t.sender && t.sender.track && t.sender.track.kind === "video") ||
 									(t.receiver && t.receiver.track && t.receiver.track.kind === "video")) {
 								videoTransceiver = t;
@@ -1845,7 +1857,7 @@ function Janus(gatewayCallbacks) {
 				config.bitrate.value = "0 kbits/sec";
 			}
 			Janus.log("Preparing local SDP and gathering candidates (trickle=" + config.trickle + ")");
-			config.pc.oniceconnectionstatechange = function(e) {
+			config.pc.oniceconnectionstatechange = function() {
 				if(config.pc)
 					pluginHandle.iceState(config.pc.iceConnectionState);
 			};
@@ -1944,7 +1956,7 @@ function Janus(gatewayCallbacks) {
 							pluginHandle.onremotestream(config.remoteStream);
 						} catch(e) {
 							Janus.error(e);
-						};
+						}
 					}
 				};
 			};
@@ -2206,7 +2218,7 @@ function Janus(gatewayCallbacks) {
 			}
 		}
 		// If we're updating, check if we need to remove/replace one of the tracks
-		if(media.update && !config.streamExternal) {
+		if(media.update && (!config.streamExternal || (config.streamExternal && (media.replaceAudio || media.replaceVideo)))) {
 			if(media.removeAudio || media.replaceAudio) {
 				if(config.myStream && config.myStream.getAudioTracks() && config.myStream.getAudioTracks().length) {
 					var at = config.myStream.getAudioTracks()[0];
@@ -2264,12 +2276,10 @@ function Janus(gatewayCallbacks) {
 			Janus.log("MediaStream provided by the application");
 			Janus.debug(stream);
 			// If this is an update, let's check if we need to release the previous stream
-			if(media.update) {
-				if(config.myStream && config.myStream !== callbacks.stream && !config.streamExternal) {
-					// We're replacing a stream we captured ourselves with an external one
-					Janus.stopAllTracks(config.myStream);
-					config.myStream = null;
-				}
+			if(media.update && config.myStream && config.myStream !== callbacks.stream && !config.streamExternal && !media.replaceAudio && !media.replaceVideo) {
+				// We're replacing a stream we captured ourselves with an external one
+				Janus.stopAllTracks(config.myStream);
+				config.myStream = null;
 			}
 			// Skip the getUserMedia part
 			config.streamExternal = true;
@@ -2298,46 +2308,38 @@ function Janus(gatewayCallbacks) {
 						videoSupport = media.video;
 					} else {
 						var width = 0;
-						var height = 0, maxHeight = 0;
+						var height = 0;
 						if(media.video === 'lowres') {
 							// Small resolution, 4:3
 							height = 240;
-							maxHeight = 240;
 							width = 320;
 						} else if(media.video === 'lowres-16:9') {
 							// Small resolution, 16:9
 							height = 180;
-							maxHeight = 180;
 							width = 320;
 						} else if(media.video === 'hires' || media.video === 'hires-16:9' || media.video === 'hdres') {
 							// High(HD) resolution is only 16:9
 							height = 720;
-							maxHeight = 720;
 							width = 1280;
 						} else if(media.video === 'fhdres') {
 							// Full HD resolution is only 16:9
 							height = 1080;
-							maxHeight = 1080;
 							width = 1920;
 						} else if(media.video === '4kres') {
 							// 4K resolution is only 16:9
 							height = 2160;
-							maxHeight = 2160;
 							width = 3840;
 						} else if(media.video === 'stdres') {
 							// Normal resolution, 4:3
 							height = 480;
-							maxHeight = 480;
 							width = 640;
 						} else if(media.video === 'stdres-16:9') {
 							// Normal resolution, 16:9
 							height = 360;
-							maxHeight = 360;
 							width = 640;
 						} else {
 							Janus.log("Default video setting is stdres 4:3");
 							height = 480;
-							maxHeight = 480;
 							width = 640;
 						}
 						Janus.log("Adding media constraint:", media.video);
@@ -2383,7 +2385,7 @@ function Janus(gatewayCallbacks) {
 					}
 					// We're going to try and use the extension for Chrome 34+, the old approach
 					// for older versions of Chrome, or the experimental support in Firefox 33+
-					function callbackUserMedia (error, stream) {
+					const callbackUserMedia = function(error, stream) {
 						pluginHandle.consentDialog(false);
 						if(error) {
 							callbacks.error(error);
@@ -2391,7 +2393,7 @@ function Janus(gatewayCallbacks) {
 							streamsDone(handleId, jsep, media, callbacks, stream);
 						}
 					}
-					function getScreenMedia(constraints, gsmCallback, useAudio) {
+					const getScreenMedia = function(constraints, gsmCallback, useAudio) {
 						Janus.log("Adding media constraint (screen capture)");
 						Janus.debug(constraints);
 						navigator.mediaDevices.getUserMedia(constraints)
@@ -2761,7 +2763,7 @@ function Janus(gatewayCallbacks) {
 		if(sendVideo && simulcast && Janus.webRTCAdapter.browserDetails.browser === "firefox") {
 			// FIXME Based on https://gist.github.com/voluntas/088bc3cc62094730647b
 			Janus.log("Enabling Simulcasting for Firefox (RID)");
-			var sender = config.pc.getSenders().find(function(s) {return s.track.kind === "video"});
+			var sender = config.pc.getSenders().find(function(s) {return s.track && s.track.kind === "video"});
 			if(sender) {
 				var parameters = sender.getParameters();
 				if(!parameters) {
@@ -3349,10 +3351,10 @@ function Janus(gatewayCallbacks) {
 		var ssrc = [ -1 ], ssrc_fid = [ -1 ];
 		var cname = null, msid = null, mslabel = null, label = null;
 		var insertAt = -1;
-		for(var i=0; i<lines.length; i++) {
-			var mline = lines[i].match(/m=(\w+) */);
+		for(let i=0; i<lines.length; i++) {
+			const mline = lines[i].match(/m=(\w+) */);
 			if(mline) {
-				var medium = mline[1];
+				const medium = mline[1];
 				if(medium === "video") {
 					// New video m-line: make sure it's the first one
 					if(ssrc[0] < 0) {
@@ -3421,10 +3423,10 @@ function Janus(gatewayCallbacks) {
 			// Couldn't find a FID attribute, let's just take the first video SSRC we find
 			insertAt = -1;
 			video = false;
-			for(var i=0; i<lines.length; i++) {
-				var mline = lines[i].match(/m=(\w+) */);
+			for(let i=0; i<lines.length; i++) {
+				const mline = lines[i].match(/m=(\w+) */);
 				if(mline) {
-					var medium = mline[1];
+					const medium = mline[1];
 					if(medium === "video") {
 						// New video m-line: make sure it's the first one
 						if(ssrc[0] < 0) {
@@ -3454,7 +3456,7 @@ function Janus(gatewayCallbacks) {
 						continue;
 					}
 				} else {
-					var match = lines[i].match('a=ssrc:' + ssrc[0] + ' cname:(.+)')
+					let match = lines[i].match('a=ssrc:' + ssrc[0] + ' cname:(.+)')
 					if(match) {
 						cname = match[1];
 					}
