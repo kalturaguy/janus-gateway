@@ -5,9 +5,11 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+permissions:
+  contents: read
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         compiler: [gcc, clang]
@@ -37,7 +39,7 @@ jobs:
         sudo apt-get update && sudo apt-get --no-install-recommends -y install
         autoconf
         cmake
-        gengetopt
+        duktape-dev
         gtk-doc-tools
         libavcodec-dev
         libavformat-dev
@@ -46,8 +48,7 @@ jobs:
         libconfig-dev
         libevent-dev
         libglib2.0-dev
-        libgnutls28-dev
-        libini-config-dev
+        libgirepository1.0-dev
         liblua5.3-dev
         libjansson-dev
         libmicrohttpd-dev
@@ -58,6 +59,7 @@ jobs:
         librabbitmq-dev
         libsofia-sip-ua-dev
         libssl-dev
+        libtool
         libvorbis-dev
         ninja-build
         openssl
@@ -74,28 +76,28 @@ jobs:
       run: sudo apt-get --no-install-recommends -y install libcurl4-openssl-dev
     - name: setup python
       if: ${{ matrix.deps_from_src == 'yes' }}
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
-        python-version: '3.8.5'
+        python-version: '3.10'
         architecture: 'x64'
     - name: install python packages
       if: ${{ matrix.deps_from_src == 'yes' }}
-      run: pip3 install -Iv wheel meson==0.54.3
+      run: pip install wheel meson
     - name: setup libnice from sources
       if: ${{ matrix.deps_from_src == 'yes' }}
       run: |
         git clone --depth 1 --quiet -b master https://gitlab.freedesktop.org/libnice/libnice.git libnice
         pushd libnice
-        if [ $CC = clang ]; then LNICE_CFLAGS="-Wno-cast-align"; fi; 
+        if [ $CC = clang ]; then LNICE_CFLAGS="-Wno-cast-align"; fi;
         meson setup -Dprefix=/usr -Dlibdir=lib -Dc_args="$LNICE_CFLAGS" -Ddebug=false -Doptimization=0 -Dexamples=disabled -Dgtk_doc=disabled -Dgupnp=disabled -Dgstreamer=disabled -Dtests=disabled build
         ninja -C build
         sudo ninja -C build install
     - name: checkout libsrtp source
       if: ${{ matrix.deps_from_src == 'yes' }}
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         repository: cisco/libsrtp
-        ref: v2.3.0
+        ref: v2.6.0
     - name: setup libsrtp from sources
       if: ${{ matrix.deps_from_src == 'yes' }}
       run: |
@@ -104,7 +106,7 @@ jobs:
         sudo make install
     - name: checkout usrsctp source
       if: ${{ matrix.datachannels == 'yes' && matrix.deps_from_src == 'yes' }}
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         repository: sctplab/usrsctp
         ref: master
@@ -117,10 +119,10 @@ jobs:
         sudo make install
     - name: checkout lws source
       if: ${{ matrix.deps_from_src == 'yes' }}
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         repository: warmcat/libwebsockets
-        ref: v4.1-stable
+        ref: v4.3.2
     - name: setup lws from sources
       if: ${{ matrix.deps_from_src == 'yes' }}
       run: |
@@ -131,45 +133,56 @@ jobs:
         sudo make install
     - name: checkout paho-mqtt source
       if: ${{ matrix.deps_from_src == 'yes' }}
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         repository: eclipse/paho.mqtt.c
-        ref: v1.3.1
+        ref: v1.3.12
     - name: setup paho-mqtt from sources
       if: ${{ matrix.deps_from_src == 'yes' }}
       run: |
-        cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DPAHO_WITH_SSL=TRUE -DPAHO_BUILD_SAMPLES=FALSE -DPAHO_BUILD_DOCUMENTATION=FALSE
+        cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DPAHO_WITH_SSL=TRUE -DPAHO_BUILD_SAMPLES=FALSE -DPAHO_BUILD_DOCUMENTATION=FALSE .
         make -j$(nproc)
         sudo make install
     - name: checkout janus source
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: build janus from sources
       env:
         JANUS_CONFIG_COMMON: "--disable-docs --enable-post-processing --enable-plugin-lua --enable-plugin-duktape --enable-json-logger"
         JANUS_CONFIG_OPTS: ${{ matrix.janus_config_opts }}
+      # Asan in llvm 14 provided in ubuntu 22.04 is incompatible with
+      # high-entropy ASLR in much newer kernels that GitHub runners are
+      # using leading to random crashes: https://reviews.llvm.org/D148280
       run: |
+        sudo sysctl vm.mmap_rnd_bits=28
         ./autogen.sh
         ./configure $JANUS_CONFIG_COMMON $JANUS_CONFIG_OPTS
-         make -j$(nproc)
-         make check-fuzzers
+        make -j$(nproc)
+        make check-fuzzers
   javascript-lint:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: Install modules
-      run: npm install --only=dev
-    - name: Run ESLint
-      run: node_modules/.bin/eslint html/janus.js
-  javascript-rollup:
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v2
-    - name: Rollup
       run: |
         cd npm
         npm install
-        npm run rollup -- --o janus.cjs.js --f cjs
-    - uses: actions/upload-artifact@v2
+    - name: Run ESLint
+      run: |
+        cd npm
+        npm run lint
+  javascript-dist:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install modules
+      run: |
+        cd npm
+        npm install
+    - name: Make dist files
+      run: |
+        cd npm
+        npm run prerelease
+    - uses: actions/upload-artifact@v4
       with:
-        name: janus.cjs.js
-        path: npm/janus.cjs.js
+        name: janus.es.js
+        path: npm/dist/janus.es.js
